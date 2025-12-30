@@ -1,7 +1,5 @@
 streamlit
 requests
-strands
-strands-agents
 boto3
 python-dotenv
 pypdf
