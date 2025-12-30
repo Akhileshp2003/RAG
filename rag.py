@@ -1,50 +1,43 @@
 import time
-import boto3
-
+from typing import List
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_aws import BedrockEmbeddings
 from langchain_community.vectorstores import FAISS
 
+# ===== Local Embeddings (Sentence Transformers) =====
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-# =========================
-# ENV + AWS CONFIG
-# =========================
-
-REGION = "us-east-1"
-MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-
-bedrock_client = boto3.client("bedrock-runtime", region_name=REGION)
+# ===== Local LLM (LLaMA via HuggingFace / llama-cpp) =====
+from langchain_community.llms import LlamaCpp
 
 
 # =========================
-# CLAUDE CONVERSE CALL
+# LOCAL LLM CONFIG
 # =========================
-def call_claude(prompt: str) -> str:
-    params = {
-        "modelId": MODEL_ID,
-        "messages": [
-            {
-                "role": "user",
-                "content": [{"text": prompt}]
-            }
-        ],
-        "inferenceConfig": {
-            "temperature": 0.0,
-            "maxTokens": 4000
-        },
-    }
 
-    try:
-        t0 = time.time()
-        resp = bedrock_client.converse(**params)
-        print(f"[INFO] Claude call took {time.time() - t0:.2f}s")
+# Download a GGUF model first (example):
+# https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF
+# Place it locally and update the path below
 
-        return resp["output"]["message"]["content"][0]["text"]
+LLAMA_MODEL_PATH = r"C:\Users\DELL\Desktop\shellkode\nandha_college_demo\models\llama-2-7b-chat.Q2_K.gguf"
 
-    except Exception as err:
-        raise RuntimeError(f"Bedrock Converse error: {err}")
+
+llm = LlamaCpp(
+    model_path=LLAMA_MODEL_PATH,
+    temperature=0.0,
+    max_tokens=512,
+    n_ctx=4096,
+    verbose=False,
+)
+
+
+def call_llm(prompt: str) -> str:
+    """Call local LLaMA model"""
+    t0 = time.time()
+    response = llm.invoke(prompt)
+    print(f"[INFO] LLM call took {time.time() - t0:.2f}s")
+    return response
 
 
 # =========================
@@ -52,7 +45,7 @@ def call_claude(prompt: str) -> str:
 # =========================
 def build_vector_store(pdf_path: str) -> FAISS:
     """
-    Load PDF → split → embed → FAISS
+    Load PDF → split → embed (Sentence Transformers) → FAISS
     """
     loader = PyPDFLoader(pdf_path)
     documents = loader.load()
@@ -63,9 +56,8 @@ def build_vector_store(pdf_path: str) -> FAISS:
     )
     chunks = splitter.split_documents(documents)
 
-    embeddings = BedrockEmbeddings(
-        model_id="amazon.titan-embed-text-v1",
-        region_name=REGION
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
     vector_store = FAISS.from_documents(chunks, embeddings)
@@ -86,7 +78,6 @@ def ask_pdf_question(
         f"Page {doc.metadata.get('page')}:\n{doc.page_content}"
         for doc in docs
     )
-    print(context)
 
     prompt = f"""
 You are a document-based assistant.
@@ -100,9 +91,11 @@ Context:
 
 Question:
 {question}
+
+Answer:
 """
 
-    return call_claude(prompt)
+    return call_llm(prompt)
 
 
 # =========================
@@ -111,10 +104,10 @@ Question:
 if __name__ == "__main__":
     PDF_PATH = "resume.pdf"
 
-    print("Building FAISS index...")
+    print("Building FAISS index with Sentence Transformers...")
     vector_store = build_vector_store(PDF_PATH)
 
-    print("RAG system ready. Ask questions!\n")
+    print("Local RAG system ready. Ask questions!\n")
 
     while True:
         query = input("Ask a question (or type 'exit'): ")
